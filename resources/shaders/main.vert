@@ -12,19 +12,18 @@ layout (location = 1) in vec3 aNormal;
 
 out vec3 Pos;  
 out vec3 Norm;
-out vec3 camPos;
 
 uniform Camera camera;
-uniform mat4 transform;
+uniform mat4 global_transform;
+uniform mat4 local_transform;
 
 void main()
 {
-    vec4 temp = transform * vec4(aPos, 1.0);
+    vec4 temp = global_transform * local_transform * vec4(aPos, 1.0);
 
-    gl_Position = camera.projection * camera.view * transform * vec4(aPos, 1.0);
+    gl_Position = camera.projection * camera.view * temp;
 
     Pos = vec3(temp);
     Norm = aNormal;
-    fNorm = aNormal;
 
 }

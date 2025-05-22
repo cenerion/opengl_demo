@@ -9,58 +9,22 @@
 #include <fstream>
 #include <filesystem>
 #include <vector>
-#include <span>
+#include <string>
+#include <memory>
 #include <format>
 #include <unordered_map>
+#include <tuple>
 
+#include "Mesh.hpp"
 #include "sphere.hpp"
 #include "cube.hpp"
+#include "camera.hpp"
+#include "transform.hpp"
 
 using namespace glm;
 
-struct Camera{
-    vec3 position;
-    vec3 look_at;
-    vec3 up_dir;
 
-    float near_plane;
-    float far_plane;
-    float fov;
-    float aspect;
-
-    mat4 view;
-    mat4 perspective;
-
-    mat4 calc_view(){
-        view = lookAt(position, look_at, up_dir);
-        return view;
-    }
-
-    mat4 calc_perpective(){
-        perspective = glm::perspective(
-                    radians(fov), 
-                    aspect, 
-                    near_plane, 
-                    far_plane
-                );
-
-        return perspective;
-    }
-};
-
-static Camera g_camera = {
-    vec3(), //position
-    vec3(), //look_at
-    vec3(), //up_dir
-
-    0.001f,
-    100.0f,
-    100.0f,
-    1.0f,
-
-    mat4(1.0f), //view
-    mat4(1.0f), //perspective
-};
+static Camera g_camera;
 
 struct Material{
     vec3 diffuse;
@@ -90,8 +54,8 @@ struct Material{
 struct Spotlight {
     vec3 pos;
     vec3 dir;
-    float cos_a;
-    float cos_b;
+    float inner_cos;
+    float outer_cos;
 
     vec3 color;
     vec3 attenuation;
@@ -118,24 +82,14 @@ struct Spotlight {
 
         glUniform1f(
             glGetUniformLocation(shader, (ye+".cos_a").c_str()),
-            cos_a);
+            inner_cos);
 
         glUniform1f(
             glGetUniformLocation(shader, (ye+".cos_b").c_str()),
-            cos_b);
+            outer_cos);
         }
 };
 
-
-void resize_handler(GLFWwindow* window, int width, int height){
-    glViewport(0,0, width, height);
-    g_camera.aspect = (float)width / (float)height;
-    g_camera.calc_perpective();
-}
-
-void input_handler(){
-
-}
 
 
 void println(const char* str){
@@ -169,70 +123,147 @@ GLenum glCheckError_(const char *file, int line)
 #define INIT_HEIGHT 1200
 
 
-class Mesh{
+
+class Model {
 private:
-    GLuint VAO = 0;
-    unsigned int idx_count = 0;
+    std::vector<std::pair<std::weak_ptr<Mesh>, Transform>> meshs;
+    Material material { };
+    Transform model_view = Transform(1.0f);
 
 public:
-    void render(){
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, idx_count, GL_UNSIGNED_SHORT, 0);
+    Model(){
+
     }
 
-    Mesh(std::span<const float> vertices, std::span<const unsigned short> indices){
-        idx_count = indices.size();
+    Model(const Model& other){
+        meshs = other.meshs;
+        material = other.material;
+        model_view = other.model_view;
+    }
 
-        glGenVertexArrays(1, &VAO);
-        glBindVertexArray(VAO);
+    Model(Model&&) = delete;
 
-        GLuint VBO;
-        glGenBuffers(1, &VBO);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(float)*vertices.size(), vertices.data(), GL_STATIC_DRAW);
 
-        glEnableVertexAttribArray(0);  
-        glEnableVertexAttribArray(1); 
+    void addMesh(std::weak_ptr<Mesh> mesh, Transform transform){
+        meshs.emplace_back(mesh, transform);
+    }
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3* sizeof(float))); 
+    Transform& getTransform(){
+        return model_view;
+    }
+
+    void draw(GLuint shader){
+        GLuint global_trans_loc = glGetUniformLocation(shader, "global_transform");
+        GLuint local_trans_loc = glGetUniformLocation(shader, "local_transform");
         
-        GLuint EBO;
-        glGenBuffers(1, &EBO);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned short)* indices.size(), indices.data(), GL_STATIC_DRAW);
+        material.set_uniform(shader);
+
+        glUniformMatrix4fv(global_trans_loc, 1, GL_FALSE, model_view.value_ptr());
+
+        for(auto& [mesh_ptr, local_transform]: meshs){
+
+            glUniformMatrix4fv(local_trans_loc, 1, GL_FALSE, local_transform.value_ptr() );
+            mesh_ptr.lock()->render();
+        }
+    }
+
+    Material& getMaterial(){
+        return material;
     }
 };
 
 
-class Transform : public mat4{
+void resize_handler(GLFWwindow* window, int width, int height);
+
+
+
+class InputHandler{
 public:
-    Transform& translate(const vec3& v){
-        (*this) = glm::translate(*this, v);
-        return *this;
+    InputHandler()
+    {
+
     }
 
-    Transform& scale(const vec3& v){
-        (*this) = glm::scale(*this, v);
-        return *this;
+    void input_handler(GLFWwindow* window, int key, int scancode, int action, int mods) {
+        // Send key event to all KeyInput instances
+        // default - orbiting
+        // shift - moving axile
+        // ctrl - rotating
+
+        //std::println(std::cout, "key: {} a: {}, ctrl: {}, shift: {}", key, action != GLFW_RELEASE, ctrl, shift);
+        switch (key)
+        {
+        case GLFW_KEY_UP:
+        case GLFW_KEY_DOWN:
+        case GLFW_KEY_LEFT:
+        case GLFW_KEY_RIGHT:
+        case GLFW_KEY_LEFT_CONTROL:
+        case GLFW_KEY_LEFT_SHIFT:
+        case GLFW_KEY_PAGE_UP:
+        case GLFW_KEY_PAGE_DOWN:
+            state[ Key(key) ] = action != GLFW_RELEASE;
+
+        default:
+            break;
+        }
     }
 
-    value_type const* value_ptr() const{
-        return glm::value_ptr(*((mat4*)this));
+    
+    // Send key event to all KeyInput instances
+    // default - orbiting
+    // shift - moving axile
+    // ctrl - rotating
+    void process_input(float delta)
+    {
+        if(state[l_ctrl])
+        {
+            //rotating
+            vec3 dir = vec3(0.0f);
+
+            if(state[up]) dir.y += 1.0f;
+            if(state[down]) dir.y -= 1.0f;
+
+            if(state[right]) dir.x += 1.0f;
+            if(state[left]) dir.x -= 1.0f;
+
+            float move_speed = 2.0f;
+            g_camera.move_target(dir * delta * move_speed);
+        }
+        else if(state[l_shift])
+        {
+            //moving
+        }
+        else
+        {
+            //orbiting
+            vec3 dir = vec3(0.0f);
+
+            if(state[up]) dir.z -= 1.0f;
+            if(state[down]) dir.z += 1.0f;
+            if(state[right]) dir.x += 1.0f;
+            if(state[left]) dir.x -= 1.0f;
+            if(state[pg_up]) dir.y += 1.0f;
+            if(state[pg_down]) dir.y -= 1.0f;
+
+            float move_speed = 2.0f;
+            g_camera.move(dir * delta * move_speed);
+        }
     }
 
-    Transform& operator=(const mat4& m){
-        mat4::operator=(m);
-        return *this;
-    }
+    enum Key : int{
+        up = GLFW_KEY_UP,
+        down = GLFW_KEY_DOWN,
+        left = GLFW_KEY_LEFT,
+        right = GLFW_KEY_RIGHT,
+        pg_up = GLFW_KEY_PAGE_UP,
+        pg_down = GLFW_KEY_PAGE_DOWN,
+        l_shift = GLFW_KEY_LEFT_SHIFT,
+        l_ctrl = GLFW_KEY_LEFT_CONTROL
+    };
 
-    mat4 get_mat(){
-        return *this;
-    }
-
-    using mat4::mat;
+private:
+    std::unordered_map<Key, bool> state;
 };
-
 
 
 int main(){
@@ -262,6 +293,14 @@ int main(){
     }
 
     glfwSetWindowSizeCallback(window, resize_handler);
+    InputHandler input_handler;
+    glfwSetWindowUserPointer(window, &input_handler);
+
+    glfwSetKeyCallback(window, [](GLFWwindow* window, int key, int scancode, int action, int mods) -> void {
+        InputHandler* input_handler = (InputHandler*)glfwGetWindowUserPointer(window);
+        input_handler->input_handler(window, key, scancode, action, mods);
+    });
+
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
 
     glViewport(0,0, INIT_WIDTH, INIT_HEIGHT);
@@ -306,48 +345,25 @@ int main(){
     }
 
 
-
     //setting up the object
+    auto sphere_mesh = std::make_shared<Mesh>(sphere::vertices, sphere::indices);
+    auto cube_mesh = std::make_shared<Mesh>(cube::vertices, cube::indices);
 
     // Mesh sphere_mesh(sphere::vertices, sphere::indices);
     // Mesh cube_mesh(cube::vertices, cube::indices);
 
+    std::vector<Model> models;
+    models.reserve(8*8*5);
 
-    std::vector<std::pair<Mesh, std::vector<std::pair<Material, std::vector<Transform>>>>> render_objects;
-    render_objects.reserve(2);
+    auto black_sphere_mat = Material();
+    auto white_sphere_mat = Material();
+    auto black_cube_mat = Material();
+    auto white_cube_mat = Material();
 
-    auto& [sphere_mesh, sphere_mats] = render_objects.emplace_back(std::make_pair(
-        Mesh(sphere::vertices, sphere::indices), 
-        std::vector<std::pair<Material, std::vector<Transform>>>()
-    ));
-
-    auto& [cube_mesh, cube_mats] = render_objects.emplace_back(std::make_pair(
-        Mesh(cube::vertices, cube::indices), 
-        std::vector<std::pair<Material, std::vector<Transform>>>()
-    ));
-
-    sphere_mats.reserve(2);
-    cube_mats.reserve(2);
-
-    auto& [black_sphere_mat, black_sphere_instances] = sphere_mats.emplace_back(std::make_pair(
-        Material(),
-        std::vector<Transform>()
-    ));
-    auto& [white_sphere_mat, white_sphere_instances] = sphere_mats.emplace_back(std::make_pair(
-        Material(),
-        std::vector<Transform>()
-    ));
-
-
-    auto& [black_cube_mat, black_cube_instances] = cube_mats.emplace_back(std::make_pair(
-        Material(),
-        std::vector<Transform>()
-    ));
-    auto& [white_cube_mat, white_cube_instances] = cube_mats.emplace_back(std::make_pair(
-        Material(),
-        std::vector<Transform>()
-    ));
-
+    auto black_sphere_instances = std::vector<Transform>();
+    auto white_sphere_instances = std::vector<Transform>();
+    auto black_cube_instances = std::vector<Transform>();
+    auto white_cube_instances = std::vector<Transform>();
 
     black_sphere_mat = {
         vec3(0.1f), //diffuse
@@ -372,52 +388,50 @@ int main(){
 
 
     auto mat_iden = Transform(1.0f);
+
+
+    Model plansza;
+    Model pionek;
+
+    {
+        auto top = mat_iden;
+        auto mid = mat_iden;
+        auto dwn = mat_iden;
+
+        top.translate(0.0f, 1.2f, 0.0f).scale(0.25f, 0.25f, 0.25f);
+        mid.translate(0.0f, 0.6f, 0.0f).scale(0.2f, 0.6f, 0.2f);
+        dwn.scale(.25f, 0.08f, .25f);
+
+        pionek.addMesh(sphere_mesh, top);
+        pionek.addMesh(sphere_mesh, mid);
+        pionek.addMesh(cube_mesh, dwn);
+    }
+
+
     for(float x = -3.5f; x < 4.0f; x += 1.0f){
         for(float y = -3.5f; y < -2.0f; y += 1.0f){
-            auto e = mat_iden;
-            e.translate(vec3(x,y,0.0f));
-            auto top = e;
-            auto mid = e;
-            auto dwn = e;
-    
-            top.translate(vec3(0.0f, 0.0f, 1.2f)).scale(vec3(0.25f, 0.25f, 0.25f));
-            mid.translate(vec3(0.0f, 0.0f, 0.6f)).scale(vec3(0.2f, 0.2f, 0.6f));
-            dwn.scale(vec3(.4f, .4f, 0.08f));
 
-            black_sphere_instances.push_back(top);
-            black_sphere_instances.push_back(mid);
-            black_sphere_instances.push_back(dwn);
+            auto new_pionek = models.emplace_back(pionek);
+            new_pionek.getTransform().translate(x,0.0f,y);
+            new_pionek.getMaterial() = black_sphere_mat;
         }
 
         for(float y = 2.5f; y < 4.0f; y += 1.0f){
-            auto e = mat_iden;
-            e.translate(vec3(x,y,0.0f));
-            auto top = e;
-            auto mid = e;
-            auto dwn = e;
-    
-            top.translate(vec3(0.0f, 0.0f, 1.2f)).scale(vec3(0.25f, 0.25f, 0.25f));
-            mid.translate(vec3(0.0f, 0.0f, 0.6f)).scale(vec3(0.2f, 0.2f, 0.6f));
-            dwn.scale(vec3(.4f, .4f, 0.08f));
-
-            white_sphere_instances.push_back(top);
-            white_sphere_instances.push_back(mid);
-            white_sphere_instances.push_back(dwn);
+            auto new_pionek = models.emplace_back(pionek);
+            new_pionek.getTransform().translate(x,0.0f,y);
+            new_pionek.getMaterial() = white_sphere_mat;
         }
     }
-
 
 
     std::vector<mat4> cube_trans;
     cube_trans.reserve(8*8);
     int counter = 0;
     for(float x = -3.5f; x < 4.0f; x += 1.0f){
-        counter++;
         for(float y = -3.5f; y < 4.0f; y += 1.0f){
             auto tmp = mat_iden;
-            tmp = translate(tmp, vec3(x, y, -0.2f));
-            tmp = scale(tmp, vec3(.5f, .5f, .1f));
-            //cube_trans.push_back(tmp);
+            tmp.translate(x, -0.2f, y).scale(.5f, .1f, .5f);
+            
             if(counter % 2 == 0){
                 black_cube_instances.push_back(tmp);
             }
@@ -426,6 +440,7 @@ int main(){
             }
             counter++;
         }
+        counter++;
     }
     
 
@@ -434,103 +449,103 @@ int main(){
     Spotlight light[3];
 
     light[0].attenuation = vec3(1.0f, 0.07f, 0.017f);
-    light[0].color = vec3(1.0f, 1.0f, 1.0f);
+    light[0].color = vec3(0.6f);
     light[0].pos = vec3(0.0f, .0f, 2.0f);
     light[0].dir = normalize(vec3(0.0f, 0.0f, -1.0f));
-    light[0].cos_a = cos(radians(30.0f));
-    light[0].cos_b = cos(radians(45.0f));
+    light[0].inner_cos = cos(radians(30.0f));
+    light[0].outer_cos = cos(radians(45.0f));
 
     light[1].attenuation = vec3(1.0f, 0.07f, 0.017f);
-    light[1].color = vec3(1.0f, 1.0f, 1.0f);
+    light[1].color = vec3(0.0f, 1.0f, 0.0f);
     light[1].pos = vec3(0.0f, .0f, 2.0f);
-    light[1].dir = normalize(vec3(0.0f, 0.0f, -1.0f));
-    light[1].cos_a = cos(radians(30.0f));
-    light[1].cos_b = cos(radians(45.0f));
+    light[1].dir = normalize(vec3(4.0f, 4.0f, -1.0f) - light[1].pos);
+    light[1].inner_cos = cos(radians(30.0f));
+    light[1].outer_cos = cos(radians(45.0f));
 
     light[2].attenuation = vec3(1.0f, 0.07f, 0.017f);
-    light[2].color = vec3(1.0f, 1.0f, 1.0f);
+    light[2].color = vec3(1.0f, 0.0f, 0.0f);
     light[2].pos = vec3(0.0f, .0f, 2.0f);
-    light[2].dir = normalize(vec3(0.0f, 0.0f, -1.0f));
-    light[2].cos_a = cos(radians(30.0f));
-    light[2].cos_b = cos(radians(45.0f));
+    light[2].dir = normalize(vec3(-4.0f, -4.0f, 0.0f) - light[2].pos);
+    light[2].inner_cos = cos(radians(30.0f));
+    light[2].outer_cos = cos(radians(45.0f));
+/**///
+
+
+    g_camera.set_position(vec3(0.0f, 5.0f, 2.0f));
+    g_camera.set_target(vec3(0.0f, 0.0f, 0.0f));
+    g_camera.set_up_direction(vec3(0,1,0));
+    g_camera.set_fov(100.0f);
+    g_camera.set_near_plane(0.001f);
+    g_camera.set_far_plane(100.0f);
+    g_camera.set_aspect((float)INIT_WIDTH / (float)INIT_HEIGHT);
+    g_camera.recalculate();
 
 
 
-    g_camera.position = vec3(0.0f, 5.0f, 2.0f);
-    g_camera.up_dir = vec3(0.0f, 0.0f, 1.0f);
-    g_camera.look_at = vec3(0.0f, 0.0f, 0.0f);
-
-    g_camera.fov = 60.0f;
-    g_camera.near_plane = 0.001f;
-    g_camera.far_plane = 100.0f;
-    g_camera.aspect = (float)INIT_WIDTH / (float)INIT_HEIGHT;
-    
-    g_camera.calc_view();
-    g_camera.calc_perpective();
-
-
-    GLuint view_loc = glGetUniformLocation(shader, "camera.view");
-    GLuint projection_loc = glGetUniformLocation(shader, "camera.projection");
-    GLuint campos_loc = glGetUniformLocation(shader, "CamPos");
-    GLuint transform_loc = glGetUniformLocation(shader, "transform");
+    GLuint global_transform_loc = glGetUniformLocation(shader, "global_transform");
+    GLuint local_transform_loc = glGetUniformLocation(shader, "local_transform");
     GLuint is_flat_loc = glGetUniformLocation(shader, "is_flat_shading");
-
 
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE); 
-    //glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
+    //glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );//
     glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
 
 
     glUseProgram(shader);
-    glUniformMatrix4fv(view_loc, 1, GL_FALSE, glm::value_ptr(g_camera.view));
-    glUniformMatrix4fv(projection_loc, 1, GL_FALSE, glm::value_ptr(g_camera.perspective));
 
     glUniform1i(is_flat_loc, 0);
     light[0].set_uniform(shader, 0);
+    light[1].set_uniform(shader, 1);
+    light[2].set_uniform(shader, 2);
 
 
-
+    auto time_s = glfwGetTime();
     while(!glfwWindowShouldClose(window)){
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClearColor(0.4f, 0.4f, 0.4f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glfwPollEvents();
 
-        double t = glfwGetTime()*8;
-        double r = 8.0;
-        g_camera.position.x = sin(radians(t)) * r;
-        g_camera.position.y = cos(radians(t)) * r;
-        g_camera.position.z = 2.0f;
-        //g_camera.position = g_camera.position + g_camera.look_at;
-        g_camera.calc_view();
+        
+        auto delta = glfwGetTime() - time_s;
+        time_s = glfwGetTime();
 
-        glUniform3fv(campos_loc, 1, value_ptr(g_camera.position));
-        glUniformMatrix4fv(view_loc, 1, GL_FALSE, glm::value_ptr(g_camera.view));
-        glUniformMatrix4fv(projection_loc, 1, GL_FALSE, glm::value_ptr(g_camera.perspective));
+        input_handler.process_input(delta);
+
+        g_camera.recalculate();
+        g_camera.set_shader(shader);
 
 
-        glUniform1i(is_flat_loc, 0);
-
-        for(auto& [mesh, mats]: render_objects){
-            for(auto& [mat, transforms]: mats){
-                mat.set_uniform(shader);
-                for(auto& t: transforms){
-                    glUniformMatrix4fv(transform_loc, 1, GL_FALSE, t.value_ptr() );
-                    mesh.render();
-                }
-            }
-
+        for(auto& model : models){
+            model.draw(shader);
         }
 
+
+        glUniformMatrix4fv(local_transform_loc, 1, GL_FALSE, mat_iden.value_ptr());
+        black_cube_mat.set_uniform(shader);
+        for(auto& t: black_cube_instances){
+            glUniformMatrix4fv(global_transform_loc, 1, GL_FALSE, t.value_ptr() );
+            cube_mesh->render();
+        }
         
-        // glUniform1i(is_flat_loc, 1);
-        // for(auto& t : cube_trans){
-        //     glUniformMatrix4fv(transform_loc, 1, GL_FALSE, value_ptr(t));
-        //     cube_mesh.render();
-        // }
-
-
+        white_cube_mat.set_uniform(shader);
+        for(auto& t: white_cube_instances){
+            glUniformMatrix4fv(global_transform_loc, 1, GL_FALSE, t.value_ptr() );
+            cube_mesh->render();
+        }
+        
+        black_sphere_mat.set_uniform(shader);
+        for(auto& t: black_sphere_instances){
+            glUniformMatrix4fv(global_transform_loc, 1, GL_FALSE, t.value_ptr() );
+            sphere_mesh->render();
+        }
+        
+        white_sphere_mat.set_uniform(shader);
+        for(auto& t: white_sphere_instances){
+            glUniformMatrix4fv(global_transform_loc, 1, GL_FALSE, t.value_ptr() );
+            sphere_mesh->render();
+        }
 
         glfwSwapBuffers(window);
     }
@@ -538,4 +553,12 @@ int main(){
 
     glfwTerminate();
     return 0;
+}
+
+
+
+void resize_handler(GLFWwindow* window, int width, int height){
+    glViewport(0,0, width, height);
+    g_camera.set_aspect((float)width / (float)height);
+    g_camera.recalculate();
 }
