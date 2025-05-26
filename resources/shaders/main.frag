@@ -71,9 +71,9 @@ vec3 calc_light(Spotlight l, vec3 pos, vec3 norm, Material material){
 
 void main()
 {
-    //vec3 l = ambient;
+    vec3 l = ambient;
 
-    vec3 l = vec3(0.0);
+    //vec3 l = vec3(0.0);
     for(int i = 0; i < LIGHTS_COUNT; ++i){
         l += calc_light(light[i], Pos, Norm, material);
     }

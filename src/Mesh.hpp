@@ -5,7 +5,7 @@
 
 class Mesh{
 public:
-    Mesh(std::span<const float> vertices, std::span<const unsigned short> indices);
+    Mesh(std::span<const float> vertices, std::span<const unsigned int> indices);
     void render();
 
 private:

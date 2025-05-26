@@ -50,7 +50,6 @@ struct Material{
     }
 };
 
-
 struct Spotlight {
     vec3 pos;
     vec3 dir;
@@ -91,7 +90,6 @@ struct Spotlight {
 };
 
 
-
 void println(const char* str){
     std::cout << str << "\n";
 }
@@ -119,8 +117,8 @@ GLenum glCheckError_(const char *file, int line)
 }
 #define glCheckError() glCheckError_(__FILE__, __LINE__) 
 
-#define INIT_WIDTH 1800
-#define INIT_HEIGHT 1200
+#define INIT_WIDTH 800
+#define INIT_HEIGHT 600
 
 
 
@@ -381,7 +379,7 @@ int main(){
         vec3(0.0f), //luminance
     };
     white_cube_mat = white_sphere_mat;
-
+//
 
     std::vector<mat4> transforms;
     transforms.reserve(8*4*3);
@@ -450,22 +448,22 @@ int main(){
 
     light[0].attenuation = vec3(1.0f, 0.07f, 0.017f);
     light[0].color = vec3(0.6f);
-    light[0].pos = vec3(0.0f, .0f, 2.0f);
-    light[0].dir = normalize(vec3(0.0f, 0.0f, -1.0f));
+    light[0].pos = vec3(0.0f, 2.0f, .0f);
+    light[0].dir = normalize(vec3(0.0f, 0.0f, 0.0f) - light[1].pos);
     light[0].inner_cos = cos(radians(30.0f));
     light[0].outer_cos = cos(radians(45.0f));
 
     light[1].attenuation = vec3(1.0f, 0.07f, 0.017f);
     light[1].color = vec3(0.0f, 1.0f, 0.0f);
-    light[1].pos = vec3(0.0f, .0f, 2.0f);
-    light[1].dir = normalize(vec3(4.0f, 4.0f, -1.0f) - light[1].pos);
+    light[1].pos = vec3(0.0f, 2.0f, .0f);
+    light[1].dir = normalize(vec3(4.0f, -1.0f, 4.0f) - light[1].pos);
     light[1].inner_cos = cos(radians(30.0f));
     light[1].outer_cos = cos(radians(45.0f));
 
     light[2].attenuation = vec3(1.0f, 0.07f, 0.017f);
     light[2].color = vec3(1.0f, 0.0f, 0.0f);
-    light[2].pos = vec3(0.0f, .0f, 2.0f);
-    light[2].dir = normalize(vec3(-4.0f, -4.0f, 0.0f) - light[2].pos);
+    light[2].pos = vec3(0.0f, 2.0f, .0f);
+    light[2].dir = normalize(vec3(-4.0f, 0.0f, -4.0f) - light[2].pos);
     light[2].inner_cos = cos(radians(30.0f));
     light[2].outer_cos = cos(radians(45.0f));
 /**///

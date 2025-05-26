@@ -2,7 +2,7 @@
 #include "Mesh.hpp"
 
 
-Mesh::Mesh(std::span<const float> vertices, std::span<const unsigned short> indices){
+Mesh::Mesh(std::span<const float> vertices, std::span<const unsigned int> indices){
     idx_count = indices.size();
 
     glGenVertexArrays(1, &VAO);
@@ -22,7 +22,7 @@ Mesh::Mesh(std::span<const float> vertices, std::span<const unsigned short> indi
     GLuint EBO;
     glGenBuffers(1, &EBO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned short)* indices.size(), indices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int)* indices.size(), indices.data(), GL_STATIC_DRAW);
 }
 
 void Mesh::render(){

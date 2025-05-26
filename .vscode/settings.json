@@ -59,6 +59,7 @@
         "variant": "cpp",
         "print": "cpp",
         "text_encoding": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "chrono": "cpp"
     }
 }
